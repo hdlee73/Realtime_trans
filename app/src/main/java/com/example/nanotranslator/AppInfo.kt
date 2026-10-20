@@ -12,6 +12,11 @@ object AppInfo {
 
     /** 앱에 내장된 업데이트 정보 (새 버전을 낼 때 맨 위에 추가) */
     val updateNotes: List<Pair<String, List<String>>> = listOf(
+        "1.0.3" to listOf(
+            "문장 단위 통역: 문장이 끝나는 즉시 번역하고 읽어 줌",
+            "번역 요청을 한 문장씩 순서대로 처리하고, 밀리면 오래된 문장은 건너뜀",
+            "'Background usage is blocked' 오류 시 자동 재시도, 통역 중 화면 켜짐 유지"
+        ),
         "1.0.2" to listOf(
             "블루투스 헤드셋이 연결되면 헤드셋 마이크를 우선 사용",
             "화면에서 '휴대폰 마이크'를 직접 선택할 수 있음",

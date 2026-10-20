@@ -29,9 +29,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private enum class Screen { MAIN, ABOUT }
+
+private const val MAX_PENDING_SENTENCES = 3
+private const val FOREGROUND_WAIT_MS = 10_000L
 
 class MainActivity : ComponentActivity() {
 
@@ -44,6 +53,33 @@ class MainActivity : ComponentActivity() {
 
     @Volatile
     private var isSpeakerTtsPlaying = false
+
+    // Gemini Nano(AICore)는 앱이 화면 앞에 있을 때만 호출할 수 있어서, 포커스 상태를 추적합니다.
+    private val resumed = MutableStateFlow(false)
+    private val windowFocused = MutableStateFlow(false)
+    private val inForeground = MutableStateFlow(false)
+
+    private fun updateForeground() {
+        inForeground.value = resumed.value && windowFocused.value
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumed.value = true
+        updateForeground()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        resumed.value = false
+        updateForeground()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        windowFocused.value = hasFocus
+        updateForeground()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +134,61 @@ class MainActivity : ComponentActivity() {
         val currentLang by rememberUpdatedState(detectedActiveLang)
         val listeningNow by rememberUpdatedState(isListening)
 
+        val chunker = remember { SentenceChunker() }
+        val jobs = remember { ArrayDeque<Pair<String, SupportedLanguage>>() }
+        val jobSignal = remember { Channel<Unit>(Channel.CONFLATED) }
+        fun enqueue(text: String, lang: SupportedLanguage) {
+            if (text.isBlank()) return
+            jobs.addLast(text to lang)
+            // 밀리면 오래된 문장은 건너뛰고 최신 문장부터 처리 (실시간성 우선)
+            while (jobs.size > MAX_PENDING_SENTENCES) jobs.removeFirst()
+            jobSignal.trySend(Unit)
+        }
+
+        // 번역은 한 번에 한 문장씩, 순서대로 처리한다. AICore 는 화면 앞에서만 호출 가능하다.
+        LaunchedEffect(Unit) {
+            for (signal in jobSignal) {
+                while (true) {
+                    val (text, lang) = jobs.removeFirstOrNull() ?: break
+                    var attempt = 0
+                    while (true) {
+                        if (!inForeground.value) {
+                            modelStatus = "앱이 화면 앞에 있을 때만 번역할 수 있어요"
+                            withTimeoutOrNull(FOREGROUND_WAIT_MS) { inForeground.first { it } }
+                        }
+                        try {
+                            var latest = ""
+                            translator.translateStreamToKorean(
+                                sourceText = text,
+                                detectedLang = lang,
+                                onSpeakableChunk = { chunk -> audioRouter.enqueueKoreanSpeech(chunk) }
+                            ).collect { partialKorean ->
+                                latest = partialKorean
+                                streamingKoreanText = partialKorean
+                            }
+                            if (latest.isNotBlank()) historyLogs.add(0, Triple(lang, text, latest))
+                            modelStatus = "온디바이스 Gemini Nano 준비 완료"
+                            break
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            attempt++
+                            val backgroundBlocked = e.message.orEmpty().let {
+                                it.contains("Background usage", ignoreCase = true) || it.contains("ErrorCode 30")
+                            }
+                            val maxAttempts = if (backgroundBlocked) 6 else 2
+                            if (attempt >= maxAttempts) {
+                                modelStatus = "번역 오류: ${e.localizedMessage}"
+                                break
+                            }
+                            modelStatus = "번역을 다시 시도하는 중... ($attempt)"
+                            delay(if (backgroundBlocked) 700L * attempt else 400L)
+                        }
+                    }
+                }
+            }
+        }
+
         LaunchedEffect(Unit) {
             if (!::audioRouter.isInitialized) {
                 audioRouter = AudioRouteController(this@MainActivity) { speaking ->
@@ -110,6 +201,8 @@ class MainActivity : ComponentActivity() {
                     onPartialTranscript = { partial, activeLang ->
                         if (!isSpeakerTtsPlaying) {
                             livePartialText = partial
+                            // 문장이 끝나는 즉시 번역 대기열에 넣는다 (문장 단위 통역)
+                            chunker.onPartial(partial, activeLang).forEach { enqueue(it, activeLang) }
                             lifecycleScope.launch {
                                 val fastDetected = languageDetector.detectLanguage(partial, activeLang)
                                 detectedActiveLang = fastDetected
@@ -118,34 +211,19 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onFinalSegment = { finalSource, audioDetectedLang ->
-                        if (!isSpeakerTtsPlaying) {
+                        if (isSpeakerTtsPlaying) {
+                            chunker.reset()
+                        } else {
                             livePartialText = finalSource
                             lifecycleScope.launch {
                                 val resolvedLang = audioDetectedLang
                                     ?: languageDetector.detectLanguage(finalSource, detectedActiveLang)
-
                                 detectedActiveLang = resolvedLang
                                 speechManager.updateAutoPrimaryLanguage(resolvedLang)
-
-                                var latestKorean = ""
-                                try {
-                                    translator.translateStreamToKorean(
-                                        sourceText = finalSource,
-                                        detectedLang = resolvedLang,
-                                        onSpeakableChunk = { chunk ->
-                                            audioRouter.enqueueKoreanSpeech(chunk)
-                                        }
-                                    ).collect { partialKorean ->
-                                        latestKorean = partialKorean
-                                        streamingKoreanText = partialKorean
-                                    }
-                                } catch (e: Exception) {
-                                    modelStatus = "번역 오류: ${e.localizedMessage}"
-                                }
-
-                                if (latestKorean.isNotBlank()) {
-                                    historyLogs.add(0, Triple(resolvedLang, finalSource, latestKorean))
-                                }
+                            }
+                            // 아직 보내지 않은 마지막 문장들
+                            chunker.onFinal(finalSource, audioDetectedLang ?: detectedActiveLang).forEach {
+                                enqueue(it, audioDetectedLang ?: detectedActiveLang)
                             }
                         }
                     },
@@ -165,6 +243,12 @@ class MainActivity : ComponentActivity() {
             micRoute = micRouter.currentRoute()
             ready = true
             translator.prepareModel { status -> modelStatus = status }
+        }
+
+        // 통역 중에는 화면이 꺼지거나 앱이 백그라운드로 가지 않도록 화면을 켜 둔다
+        LaunchedEffect(isListening) {
+            if (isListening) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
 
         val permissionLauncher = rememberLauncherForActivityResult(
@@ -301,6 +385,8 @@ class MainActivity : ComponentActivity() {
                     if (isListening) {
                         isListening = false
                         speechManager.stopListening()
+                        chunker.reset()
+                        jobs.clear()
                         micRouter.stop()
                         audioRouter.stopAll()
                     } else {
