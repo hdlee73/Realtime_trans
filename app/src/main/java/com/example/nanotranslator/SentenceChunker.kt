@@ -71,8 +71,8 @@ class SentenceChunker {
 
     private companion object {
         const val TERMINATORS = ".?!。？！…"
-        const val LONG_WORDS = 18
-        const val CUT_WORDS = 14
+        const val LONG_WORDS = 14
+        const val CUT_WORDS = 10
         const val LONG_CHARS = 40
         const val CUT_CHARS = 30
     }

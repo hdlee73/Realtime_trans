@@ -78,6 +78,11 @@ class ContinuousSpeechManager(
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 400L)
 
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // 한 번 켜 두면 문장 사이에 인식기를 다시 만들지 않고 계속 듣는다 (사이에 놓치는 말 방지)
+                putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, true)
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 val allowed = ArrayList(SupportedLanguage.entries.map { it.bcp47Tag })
                 if (selectionMode is LanguageSelection.Auto) {
@@ -120,7 +125,7 @@ class ContinuousSpeechManager(
                 }
             }
 
-            override fun onResults(results: Bundle?) {
+            private fun handleFinal(results: Bundle?) {
                 val audioLang = extractDetectedAudioLanguage(results)
                 if (selectionMode is LanguageSelection.Auto && audioLang != null && audioLang != currentPrimaryLang) {
                     currentPrimaryLang = audioLang
@@ -132,6 +137,20 @@ class ContinuousSpeechManager(
                 if (finalSentence.isNotBlank()) {
                     onFinalSegment(finalSentence, audioLang)
                 }
+            }
+
+            // 연속(분할) 세션이 아닌 경우의 최종 결과: 처리 후 인식기를 다시 시작
+            override fun onResults(results: Bundle?) {
+                handleFinal(results)
+                restartLoop(preferOnDevice)
+            }
+
+            // 연속 세션: 인식기를 끄지 않고 문장(구간)별 결과가 계속 들어온다
+            override fun onSegmentResults(segmentResults: Bundle) {
+                handleFinal(segmentResults)
+            }
+
+            override fun onEndOfSegmentedSession() {
                 restartLoop(preferOnDevice)
             }
 

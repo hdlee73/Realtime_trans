@@ -65,17 +65,12 @@ class GeminiNanoTranslator {
         if (sourceText.isBlank()) return@flow
 
         val langName = detectedLang?.promptName ?: "English, Japanese, Mandarin Chinese, or Spanish"
+        // 요청마다 처리해야 하는 프롬프트가 길수록 느려지므로 최소한으로 유지한다.
         val prompt = buildString {
-            append("You are a professional interpreter. Translate the speaker's $langName utterance into natural, polite spoken Korean (해요체).\n")
-            append("Rules:\n")
-            append("- Keep the speaker's perspective: \"I\" is the speaker and \"you\" is the person being spoken to. Never swap them.\n")
-            append("- A question stays a question addressed to the listener, in polite form (e.g. -세요?, -어요?).\n")
-            append("- Never use casual speech (반말). Use polite endings such as -요, -세요, -습니다.\n")
-            append("- Output ONLY the Korean translation, with no quotes, notes or explanations.\n\n")
+            append("Interpret the $langName speech into natural polite spoken Korean (해요체). ")
+            append("Keep who is speaking and who is addressed (I = speaker, you = listener); questions stay questions. ")
+            append("Output ONLY the Korean, one line per sentence.\n")
             append("English: How old are you?\nKorean: 몇 살이세요?\n")
-            append("English: I'm looking for the station.\nKorean: 저는 역을 찾고 있어요.\n")
-            append("Japanese: お名前は何ですか?\nKorean: 성함이 어떻게 되세요?\n")
-            append("Spanish: ¿Cuánto cuesta esto?\nKorean: 이건 얼마예요?\n\n")
             append("$langName: ${sourceText.trim()}\nKorean:")
         }
 

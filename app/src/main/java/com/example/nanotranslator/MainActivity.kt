@@ -39,7 +39,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 private enum class Screen { MAIN, ABOUT }
 
-private const val MAX_PENDING_SENTENCES = 3
+private const val MAX_PENDING_SENTENCES = 8
+private const val MAX_BATCH_SENTENCES = 3
 private const val FOREGROUND_WAIT_MS = 10_000L
 
 class MainActivity : ComponentActivity() {
@@ -134,6 +135,8 @@ class MainActivity : ComponentActivity() {
         val currentLang by rememberUpdatedState(detectedActiveLang)
         val listeningNow by rememberUpdatedState(isListening)
 
+        var speakEnabled by rememberSaveable { mutableStateOf(true) }
+        var pendingCount by remember { mutableIntStateOf(0) }
         val chunker = remember { SentenceChunker() }
         val jobs = remember { ArrayDeque<Pair<String, SupportedLanguage>>() }
         val jobSignal = remember { Channel<Unit>(Channel.CONFLATED) }
@@ -142,6 +145,7 @@ class MainActivity : ComponentActivity() {
             jobs.addLast(text to lang)
             // 밀리면 오래된 문장은 건너뛰고 최신 문장부터 처리 (실시간성 우선)
             while (jobs.size > MAX_PENDING_SENTENCES) jobs.removeFirst()
+            pendingCount = jobs.size
             jobSignal.trySend(Unit)
         }
 
@@ -149,7 +153,16 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             for (signal in jobSignal) {
                 while (true) {
-                    val (text, lang) = jobs.removeFirstOrNull() ?: break
+                    val (firstText, lang) = jobs.removeFirstOrNull() ?: break
+                    // 밀려 있으면 같은 언어의 문장을 몇 개 묶어서 한 번에 번역한다 (요청 횟수를 줄여 따라잡기)
+                    val batch = StringBuilder(firstText)
+                    var merged = 1
+                    while (merged < MAX_BATCH_SENTENCES && jobs.isNotEmpty() && jobs.first().second == lang) {
+                        batch.append(' ').append(jobs.removeFirst().first)
+                        merged++
+                    }
+                    pendingCount = jobs.size
+                    val text = batch.toString()
                     var attempt = 0
                     while (true) {
                         if (!inForeground.value) {
@@ -161,7 +174,7 @@ class MainActivity : ComponentActivity() {
                             translator.translateStreamToKorean(
                                 sourceText = text,
                                 detectedLang = lang,
-                                onSpeakableChunk = { chunk -> audioRouter.enqueueKoreanSpeech(chunk) }
+                                onSpeakableChunk = { chunk -> if (speakEnabled) audioRouter.enqueueKoreanSpeech(chunk) }
                             ).collect { partialKorean ->
                                 latest = partialKorean
                                 streamingKoreanText = partialKorean
@@ -332,12 +345,36 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("출력", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                PillChip(
+                    label = "자막 + 음성",
+                    selected = speakEnabled,
+                    onClick = { speakEnabled = true }
+                )
+                PillChip(
+                    label = "자막만 (빠름)",
+                    selected = !speakEnabled,
+                    onClick = {
+                        speakEnabled = false
+                        audioRouter.stopAll()
+                    }
+                )
+            }
+
             SoftCard {
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     StatusPill(if (isListening) "듣는 중" else "대기 중", active = isListening)
+                    if (pendingCount > 0) StatusPill("번역 대기 ${pendingCount}문장")
                     StatusPill(
                         when {
                             micRoute.usingBluetooth -> "블루투스 마이크" + (micRoute.bluetoothName?.let { ": $it" } ?: "")
@@ -387,6 +424,7 @@ class MainActivity : ComponentActivity() {
                         speechManager.stopListening()
                         chunker.reset()
                         jobs.clear()
+                        pendingCount = 0
                         micRouter.stop()
                         audioRouter.stopAll()
                     } else {
