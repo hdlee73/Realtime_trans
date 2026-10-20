@@ -39,6 +39,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var languageDetector: AutoLanguageDetector
     private lateinit var audioRouter: AudioRouteController
     private lateinit var speechManager: ContinuousSpeechManager
+    private lateinit var micRouter: MicRouteController
     private lateinit var updateManager: UpdateManager
 
     @Volatile
@@ -90,6 +91,12 @@ class MainActivity : ComponentActivity() {
         var streamingKoreanText by remember { mutableStateOf("") }
         val historyLogs = remember { mutableStateListOf<Triple<SupportedLanguage, String, String>>() }
         var ready by remember { mutableStateOf(::speechManager.isInitialized) }
+        var micPreference by remember { mutableStateOf(MicPreference.AUTO) }
+        var askedBluetoothPermission by rememberSaveable { mutableStateOf(false) }
+        var micRoute by remember { mutableStateOf(MicRoute()) }
+        val currentSelection by rememberUpdatedState(languageSelection)
+        val currentLang by rememberUpdatedState(detectedActiveLang)
+        val listeningNow by rememberUpdatedState(isListening)
 
         LaunchedEffect(Unit) {
             if (!::audioRouter.isInitialized) {
@@ -146,6 +153,16 @@ class MainActivity : ComponentActivity() {
                     onErrorInfo = {}
                 )
             }
+            if (!::micRouter.isInitialized) {
+                micRouter = MicRouteController(
+                    context = this@MainActivity,
+                    onRouteChanged = { route -> micRoute = route },
+                    onNeedRestart = {
+                        if (listeningNow) speechManager.startListening(currentSelection, currentLang)
+                    }
+                )
+            }
+            micRoute = micRouter.currentRoute()
             ready = true
             translator.prepareModel { status -> modelStatus = status }
         }
@@ -155,6 +172,7 @@ class MainActivity : ComponentActivity() {
         ) { permissions ->
             if (permissions[Manifest.permission.RECORD_AUDIO] == true && ready) {
                 isListening = true
+                micRouter.start()
                 speechManager.startListening(languageSelection, detectedActiveLang)
             }
         }
@@ -204,9 +222,46 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("마이크", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                PillChip(
+                    label = "자동 (블루투스 우선)",
+                    selected = micPreference == MicPreference.AUTO,
+                    onClick = {
+                        micPreference = MicPreference.AUTO
+                        micRouter.setPreference(MicPreference.AUTO)
+                    }
+                )
+                PillChip(
+                    label = "휴대폰 마이크",
+                    selected = micPreference == MicPreference.PHONE,
+                    onClick = {
+                        micPreference = MicPreference.PHONE
+                        micRouter.setPreference(MicPreference.PHONE)
+                    }
+                )
+            }
+
             SoftCard {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     StatusPill(if (isListening) "듣는 중" else "대기 중", active = isListening)
+                    StatusPill(
+                        when {
+                            micRoute.usingBluetooth -> "블루투스 마이크" + (micRoute.bluetoothName?.let { ": $it" } ?: "")
+                            micRoute.permissionMissing -> "휴대폰 마이크 (블루투스 권한 필요)"
+                            micRoute.bluetoothAvailable -> "휴대폰 마이크 (수동 선택)"
+                            else -> "휴대폰 마이크 (헤드셋 없음)"
+                        }
+                    )
                     StatusPill(
                         if (languageSelection is LanguageSelection.Auto) "자동 감지: ${detectedActiveLang.displayName}"
                         else "고정: ${detectedActiveLang.displayName}"
@@ -246,16 +301,22 @@ class MainActivity : ComponentActivity() {
                     if (isListening) {
                         isListening = false
                         speechManager.stopListening()
+                        micRouter.stop()
                         audioRouter.stopAll()
                     } else {
-                        if (ContextCompat.checkSelfPermission(
-                                this@MainActivity,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-                        ) {
+                        val hasMic = ContextCompat.checkSelfPermission(
+                            this@MainActivity, Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        val needsBt = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+                            ContextCompat.checkSelfPermission(
+                                this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT
+                            ) != PackageManager.PERMISSION_GRANTED && !askedBluetoothPermission
+                        if (hasMic && !needsBt) {
                             isListening = true
+                            micRouter.start()
                             speechManager.startListening(languageSelection, detectedActiveLang)
                         } else {
+                            askedBluetoothPermission = true
                             permissionLauncher.launch(
                                 arrayOf(
                                     Manifest.permission.RECORD_AUDIO,
@@ -442,6 +503,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         if (::speechManager.isInitialized) speechManager.stopListening()
+        if (::micRouter.isInitialized) micRouter.release()
         if (::audioRouter.isInitialized) audioRouter.release()
         languageDetector.close()
         translator.close()

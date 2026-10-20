@@ -46,6 +46,7 @@ class AudioRouteController(
         val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         return outputs.any {
             it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                 it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
                 it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
         }
