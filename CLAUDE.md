@@ -18,4 +18,4 @@
 ## Build & Release Commands
 - Compile debug APK: `./gradlew assembleDebug`
 - Compile release APK: `./gradlew assembleRelease`
-- Trigger GitHub Release: `git tag v1.0.1 && git push origin v1.0.1`
+- Trigger GitHub Release: `git tag v1.0.1 && git push origin v1.0.1`, or run the "Android Build & Release APK" workflow manually (workflow_dispatch) with input `version=1.0.1`; it creates the tag and release itself (Claude cloud sessions cannot push tags, so use this route there).
