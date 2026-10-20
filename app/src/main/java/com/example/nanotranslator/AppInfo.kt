@@ -12,6 +12,10 @@ object AppInfo {
 
     /** 앱에 내장된 업데이트 정보 (새 버전을 낼 때 맨 위에 추가) */
     val updateNotes: List<Pair<String, List<String>>> = listOf(
+        "1.0.1" to listOf(
+            "번역 품질 개선: 존댓말(해요체)로 번역하고 화자·청자 관점이 뒤바뀌지 않도록 수정",
+            "화면 디자인을 EngHub 스타일(민트 톤, 둥근 카드)로 새로 단장"
+        ),
         "1.0.0" to listOf(
             "영어·일본어·중국어·스페인어 자동 언어 감지",
             "온디바이스 Gemini Nano 스트리밍 한국어 번역",

@@ -22,7 +22,11 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -48,7 +52,7 @@ class MainActivity : ComponentActivity() {
         updateManager = UpdateManager(this)
 
         setContent {
-            MaterialTheme {
+            NanoTheme {
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
                 var lastBackPressed by remember { mutableLongStateOf(0L) }
 
@@ -66,7 +70,7 @@ class MainActivity : ComponentActivity() {
 
                 UpdateCheck(manual = false)
 
-                Surface(modifier = Modifier.fillMaxSize()) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Canvas) {
                     when (screen) {
                         Screen.MAIN -> TranslatorScreen(onOpenAbout = { screen = Screen.ABOUT })
                         Screen.ABOUT -> AboutScreen(onBack = { screen = Screen.MAIN })
@@ -159,21 +163,13 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "Gemini Nano 자동 언어 감지 통역기",
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = onOpenAbout) { Text("정보") }
-            }
-            Text(
-                text = modelStatus,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary
+            Hero(
+                title = AppInfo.APP_NAME,
+                subtitle = "영·일·중·서 → 한국어 · 온디바이스 Gemini Nano",
+                trailing = { HeroAction("정보", onOpenAbout) }
             )
 
             Row(
@@ -182,19 +178,19 @@ class MainActivity : ComponentActivity() {
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FilterChip(
+                PillChip(
+                    label = "자동 감지",
                     selected = languageSelection is LanguageSelection.Auto,
                     onClick = {
                         languageSelection = LanguageSelection.Auto
                         if (isListening) {
                             speechManager.startListening(LanguageSelection.Auto, detectedActiveLang)
                         }
-                    },
-                    label = { Text("✨ 자동 감지 (영·일·중·서)") }
+                    }
                 )
-
                 SupportedLanguage.entries.forEach { lang ->
-                    FilterChip(
+                    PillChip(
+                        label = lang.displayName,
                         selected = (languageSelection as? LanguageSelection.Manual)?.language == lang,
                         onClick = {
                             val manual = LanguageSelection.Manual(lang)
@@ -203,37 +199,49 @@ class MainActivity : ComponentActivity() {
                             if (isListening) {
                                 speechManager.startListening(manual, lang)
                             }
-                        },
-                        label = { Text(lang.displayName) }
+                        }
                     )
                 }
             }
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    val modeLabel = if (languageSelection is LanguageSelection.Auto) {
-                        "자동 감지됨: ${detectedActiveLang.displayName} (${detectedActiveLang.bcp47Tag})"
-                    } else {
-                        "수동 고정됨: ${detectedActiveLang.displayName}"
-                    }
-                    AssistChip(onClick = {}, label = { Text(modeLabel) })
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = livePartialText.ifBlank { "영·일·중·서 아무 언어로 말씀하세요..." },
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    Text("실시간 한국어 출력", style = MaterialTheme.typography.labelMedium)
-                    Text(
-                        text = streamingKoreanText.ifBlank { "..." },
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.secondary
+            SoftCard {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusPill(if (isListening) "듣는 중" else "대기 중", active = isListening)
+                    StatusPill(
+                        if (languageSelection is LanguageSelection.Auto) "자동 감지: ${detectedActiveLang.displayName}"
+                        else "고정: ${detectedActiveLang.displayName}"
                     )
                 }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = livePartialText.ifBlank { "영·일·중·서 아무 언어로 말씀하세요" },
+                    color = if (livePartialText.isBlank()) Muted else Ink,
+                    fontSize = 16.sp,
+                    lineHeight = 22.sp
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Line)
+                Text("한국어", color = Teal, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = streamingKoreanText.ifBlank { "번역 결과가 여기에 표시됩니다" },
+                    color = if (streamingKoreanText.isBlank()) Muted else Ink,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 30.sp
+                )
             }
 
-            Button(
+            Text(
+                text = modelStatus,
+                color = Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            BigButton(
+                text = if (isListening) "통역 중지" else "통역 시작",
                 enabled = ready,
+                danger = isListening,
                 onClick = {
                     if (isListening) {
                         isListening = false
@@ -256,35 +264,34 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isListening) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Text(if (isListening) "실시간 통역 중지" else "자동 언어 감지 통역 시작")
-            }
+                }
+            )
 
-            Text("번역 히스토리", style = MaterialTheme.typography.labelLarge)
+            Text(
+                "번역 기록",
+                color = Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+            if (historyLogs.isEmpty()) {
+                Text(
+                    "아직 번역한 문장이 없어요",
+                    color = Muted,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(historyLogs) { (lang, src, kor) ->
-                    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "[${lang.displayName}] $src",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = kor,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                    SoftCard {
+                        Text(lang.displayName, color = Teal, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(src, color = Muted, fontSize = 14.sp, lineHeight = 20.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(kor, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold, lineHeight = 24.sp)
                     }
                 }
             }
@@ -302,35 +309,44 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .padding(20.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("← 뒤로") }
-                Text("앱 정보", style = MaterialTheme.typography.headlineSmall)
+            Hero(
+                title = "앱 정보",
+                subtitle = "${AppInfo.APP_NAME} v${AppInfo.versionName}",
+                trailing = { HeroAction("← 뒤로", onBack) }
+            )
+            SoftCard {
+                Text("앱 이름", color = Muted, fontSize = 12.sp)
+                Text(AppInfo.APP_NAME, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("버전", color = Muted, fontSize = 12.sp)
+                Text("${AppInfo.versionName} (${AppInfo.versionCode})", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("만든이", color = Muted, fontSize = 12.sp)
+                Text(AppInfo.AUTHOR, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("앱 이름: ${AppInfo.APP_NAME}", style = MaterialTheme.typography.bodyLarge)
-                    Text("버전: ${AppInfo.versionName} (${AppInfo.versionCode})", style = MaterialTheme.typography.bodyLarge)
-                    Text("만든이: ${AppInfo.AUTHOR}", style = MaterialTheme.typography.bodyLarge)
-                }
-            }
-            Button(onClick = { checkRequested++ }, modifier = Modifier.fillMaxWidth()) {
-                Text("업데이트 확인")
-            }
+            BigButton(text = "업데이트 확인", onClick = { checkRequested++ })
             Text(
                 "앱을 실행할 때마다 GitHub Releases에서 새 버전을 자동으로 확인합니다.",
-                style = MaterialTheme.typography.bodySmall
+                color = Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 4.dp)
             )
-            Text("업데이트 정보", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "업데이트 정보",
+                color = Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
             AppInfo.updateNotes.forEach { (version, notes) ->
-                OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("v$version", style = MaterialTheme.typography.titleSmall)
-                        notes.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
-                    }
+                SoftCard {
+                    Text("v$version", color = Teal, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    notes.forEach { Text("• $it", color = Ink, fontSize = 14.sp, lineHeight = 21.sp) }
                 }
             }
         }
@@ -365,6 +381,8 @@ class MainActivity : ComponentActivity() {
         if (dismissed) return
 
         AlertDialog(
+            containerColor = Color.White,
+            shape = RoundedCornerShape(24.dp),
             onDismissRequest = { if (progress == null) dismissed = true },
             title = { Text("새 버전 v${info.versionName}") },
             text = {
