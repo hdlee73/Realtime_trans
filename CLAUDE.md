@@ -5,7 +5,7 @@
 - **Auto Language Detection**:
   1. Android 14+ `SpeechRecognizer` audio-level language switching (`EXTRA_ENABLE_LANGUAGE_SWITCH`)
   2. Script regex + ML Kit On-Device Language Identification (`com.google.mlkit:language-id:17.0.6`)
-- **Translation Engine**: On-device Gemini Nano via ML Kit GenAI Prompt API (`com.google.mlkit:genai-prompt`) using `generateContentStream()`
+- **Translation Engine**: On-device Gemini Nano via ML Kit GenAI Prompt API (`com.google.mlkit:genai-prompt:1.0.0-beta4`, built with Kotlin 2.3 metadata, so the project uses Kotlin 2.3.21) using `generateContentStream()`
 - **Audio Output**: `TextToSpeech` (Korean) routed via `USAGE_MEDIA` so Bluetooth earphones receive translated audio while the phone microphone captures external speech. Includes an echo-guard when running on the built-in speaker.
 - **App info / update**: `AppInfo.kt` (name, version, author 이현덕 (hdlee73@gmail.com), in-app update notes), `UpdateManager.kt` (checks GitHub Releases `latest`, downloads the non-debug APK, installs via FileProvider).
 - **Back navigation**: sub-screens return to the previous screen via `BackHandler`; on the main screen a second back press within 2s exits.
